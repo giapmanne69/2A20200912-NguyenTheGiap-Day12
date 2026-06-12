@@ -46,6 +46,7 @@ services:
     name: agent-cache
     plan: free
     maxmemoryPolicy: allkeys-lru
+    ipAllowList: ['https://vinai-production-8fb0.up.railway.app/']    # Bắt buộc: Chặn tất cả IP ngoài, chỉ cho phép kết nối nội bộ từ Render
 
 # ============================================================
 # Cách deploy:
