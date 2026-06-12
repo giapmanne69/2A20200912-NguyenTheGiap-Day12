@@ -31,7 +31,8 @@ services:
       - key: OPENAI_API_KEY
         sync: false            # sync: false = set thủ công trên dashboard
       - key: AGENT_API_KEY
-        generateValue: true    # Render tự sinh random value
+        value: vinai
+        generateValue: false   # Render tự sinh random value
 
     # Disk (nếu agent cần lưu file)
     # disk:

@@ -11,10 +11,21 @@ import sys
 import json
 import subprocess
 
+# Set encoding to UTF-8 on Windows to prevent UnicodeEncodeError with emojis
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
 
 def check(name: str, passed: bool, detail: str = "") -> dict:
     icon = "✅" if passed else "❌"
-    print(f"  {icon} {name}" + (f" — {detail}" if detail else ""))
+    try:
+        print(f"  {icon} {name}" + (f" — {detail}" if detail else ""))
+    except UnicodeEncodeError:
+        # Fallback to ascii icons if encoding reconfiguration failed
+        ascii_icon = "[OK]" if passed else "[FAIL]"
+        print(f"  {ascii_icon} {name}" + (f" — {detail}" if detail else ""))
     return {"name": name, "passed": passed}
 
 

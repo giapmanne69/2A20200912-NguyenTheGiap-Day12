@@ -67,3 +67,205 @@ graph TD
 
 **Cách các service communicate (giao tiếp):**
 Tất cả các service nằm chung trong một bridge network của Docker Compose có tên là `internal`. Nginx mở port 80/443 ra ngoài để nhận HTTP/HTTPS request từ Client, sau đó đóng vai trò load balancer phân phối các request này vào các container `agent` đang chạy ngầm. Các container `agent` không expose port trực tiếp ra host mà giao tiếp với `redis` (port 6379) và `qdrant` (port 6333) qua các hostname nội bộ tương ứng.
+
+## Part 3: Cloud Deployment
+
+### Exercise 3.1: Railway deployment
+- URL: https://vinai-production-8fb0.up.railway.app
+- Screenshot: 03-cloud-deployment\railway\utils\railway_deployment.png
+
+### Exercise 3.2: So sánh render.yaml và railway.toml
+- **`railway.toml`**: Sử dụng định dạng TOML. Chủ yếu đóng vai trò khai báo thông tin quá trình build và chạy (`startCommand`, `healthcheckPath`) cho một project/service đơn lẻ. Các thông số về môi trường (Environment Variables) hoặc tích hợp Database thường được người dùng tự tay cấu hình rời trên giao diện Dashboard hoặc bằng Railway CLI chứ không lưu chung vào code.
+- **`render.yaml`**: Sử dụng định dạng YAML. Nó hoạt động như một công cụ **Infrastructure as Code** (Cơ sở hạ tầng dưới dạng mã) thực thụ. Bạn có thể định nghĩa kiến trúc nhiều dịch vụ cùng lúc (Ví dụ: Web Service chạy Python đi kèm với một Redis cache riêng) ngay trong file này. Render tự động tạo và liên kết các dịch vụ đó, đồng thời hỗ trợ quản lý chi tiết về biến môi trường (envVars), cấu hình Disk, cấu trúc mạng (ipAllowList) ngay từ trong code.
+
+###  Checkpoint 3
+
+- [x] Deploy thành công lên ít nhất 1 platform
+- [x] Có public URL hoạt động
+- [x] Hiểu cách set environment variables trên cloud
+- [x] Biết cách xem logs
+
+## Part 4: API Security
+
+### Exercise 4.1-4.3: Test results
+
+**Exercise 4.1: API Key authentication**
+```bash
+$ curl http://localhost:8000/ask -X POST -H "Content-Type: application/json" -d '{"question": "Hello"}'
+{"detail":"Missing API key. Include header: X-API-Key: <your-key>"}
+
+$ curl http://localhost:8000/ask -X POST -H "X-API-Key: secret-key-123" -H "Content-Type: application/json" -d '{"question": "Hello"}'
+{"question":"Hello","answer":"Agent đang hoạt động tốt!...","usage":{"requests_remaining":9,"budget_remaining_usd":0.999}}
+```
+
+**Exercise 4.2: JWT authentication**
+```bash
+$ curl http://localhost:8000/auth/token -X POST -H "Content-Type: application/json" -d '{"username": "student", "password": "demo123"}'
+{"access_token":"eyJhbGciOiJIUzI1NiIsInR...","token_type":"bearer","expires_in_minutes":60,"hint":"Include in header: Authorization: Bearer eyJhbGci..."}
+
+$ TOKEN="eyJhbGciOiJIUzI1NiIsInR..."
+$ curl http://localhost:8000/ask -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"question": "Explain JWT"}'
+{"question":"Explain JWT","answer":"Agent đang hoạt động tốt!...","usage":{"requests_remaining":9,"budget_remaining_usd":0.998}}
+```
+
+**Exercise 4.3: Rate limiting**
+```bash
+$ for i in {1..20}; do
+>   curl http://localhost:8000/ask -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"question": "Test '$i'"}'
+>   echo ""
+> done
+{"question":"Test 1","answer":"Agent đang hoạt động tốt!...","usage":{"requests_remaining":9,"budget_remaining_usd":0.997}}
+{"question":"Test 2","answer":"Agent đang hoạt động tốt!...","usage":{"requests_remaining":8,"budget_remaining_usd":0.996}}
+...
+{"question":"Test 10","answer":"Agent đang hoạt động tốt!...","usage":{"requests_remaining":0,"budget_remaining_usd":0.988}}
+{"detail":"Rate limit exceeded. Try again later."}
+{"detail":"Rate limit exceeded. Try again later."}
+```
+
+### Exercise 4.4: Cost guard implementation
+
+**Cách tiếp cận (file `04-api-gateway/production/cost_guard_redis.py`):**
+
+Implement theo đúng yêu cầu CODE_LAB Exercise 4.4 — dùng **Redis** làm backend:
+
+```python
+def check_budget(user_id: str, estimated_cost: float = 0.001) -> None:
+    """
+    Logic:
+    - Mỗi user có budget $10/tháng
+    - Track spending trong Redis
+    - Reset đầu tháng (nhờ TTL của Redis key)
+    """
+    month_key = datetime.now().strftime("%Y-%m")
+    key = f"budget:{user_id}:{month_key}"
+
+    current = float(r.get(key) or 0)
+    if current + estimated_cost > MONTHLY_BUDGET_USD:
+        raise HTTPException(status_code=402, detail="Monthly budget exceeded")
+
+    r.incrbyfloat(key, estimated_cost)
+    r.expire(key, 33 * 24 * 3600)  # TTL 33 ngày → tự reset đầu tháng mới
+```
+
+**Thiết kế:**
+| Thành phần | Chi tiết |
+|------------|----------|
+| **Backend** | Redis (fallback in-memory nếu không có Redis) |
+| **Budget** | `$10.00 / user / tháng` |
+| **Key** | `budget:{user_id}:{YYYY-MM}` (mỗi tháng 1 key riêng) |
+| **TTL** | 33 ngày → key tự xóa, tương đương reset đầu tháng |
+| **Cảnh báo** | Log `WARNING` khi user đạt ≥ 80% budget |
+| **HTTP khi vượt** | `402 Payment Required` kèm chi tiết spent/remaining |
+
+**Luồng hoạt động trong `/ask` endpoint:**
+1. `check_budget(user_id)` chạy **trước** khi gọi LLM → block nếu hết tiền.
+2. LLM trả kết quả.
+3. `record_spending(user_id, actual_cost)` cộng dồn chi phí vào Redis.
+
+**Ưu điểm so với in-memory:**
+- Khi scale lên N instances, tất cả cùng đọc/ghi **một Redis** → budget được kiểm tra chính xác, không bị double-spend.
+- Redis key tự hết hạn theo TTL → không cần cronjob reset thủ công.
+
+###  Checkpoint 4
+
+- [x] Implement API key authentication
+- [x] Hiểu JWT flow
+- [x] Implement rate limiting (Sliding Window, 10 req/phút)
+- [x] Implement cost guard với Redis ($10/tháng per user, key tự reset theo TTL)
+
+## Part 5: Scaling & Reliability
+
+### Exercise 5.1-5.5: Implementation notes
+
+**Exercise 5.1: Health checks & Readiness checks**
+- **Health check (`/health`):** Liveness probe được định nghĩa để kiểm tra tiến trình chính hoạt động tốt, có thêm phần kiểm tra dung lượng memory sử dụng qua thư viện `psutil` (trả về trạng thái `degraded` nếu sử dụng >90% RAM).
+- **Readiness check (`/ready`):** Trả về `200 OK` khi ứng dụng đã sẵn sàng nhận kết nối, và trả về `503 Service Unavailable` khi ứng dụng đang khởi động (startup chưa xong) hoặc đang trong quá trình tắt (graceful shutdown).
+
+**Exercise 5.2: Graceful shutdown**
+- Implement bằng cách bắt tín hiệu `SIGTERM` và `SIGINT` thông qua uvicorn để tắt server một cách an toàn. Khi nhận được tín hiệu tắt, server chuyển `_is_ready = False` (từ chối request mới trên load balancer) và đợi toàn bộ các `in_flight_requests` hoàn thành (tối đa 30 giây) rồi mới thực hiện tắt hẳn tiến trình, giúp đảm bảo tính toàn vẹn dữ liệu cho người dùng.
+
+**Exercise 5.3: Stateless design**
+- Đã tách toàn bộ thông tin session của các hội thoại AI agent lưu vào Redis (sử dụng các phương thức `save_session`, `load_session`, `append_to_history`). Việc loại bỏ state in-memory giúp các instance của ứng dụng độc lập tuyệt đối với nhau.
+
+**Exercise 5.4-5.5: Load balancing & Stateless test**
+- Cấu hình Nginx làm load balancer sử dụng thuật toán round-robin phân phối đều traffic qua 3 instance (`agent=3`) được khởi chạy qua Docker Compose.
+- Khi chạy script kiểm tra `test_stateless.py`, kết quả trả về cho thấy mặc dù các request liên tục được phục vụ bởi các instance ID khác nhau (`served_by`), lịch sử hội thoại (`session history`) của người dùng vẫn được bảo toàn nguyên vẹn nhờ việc chia sẻ chung cơ sở dữ liệu Redis.
+
+**Test Outputs (test_stateless.py):**
+```
+Session ID: f13be069-b5f7-41ab-bc93-a4174d812d34
+
+Request 1: [instance-8a7e3d]  <- Turn 1 (served by Agent 1)
+Request 2: [instance-b2c4d5]  <- Turn 2 (served by Agent 2)
+Request 3: [instance-8a7e3d]  <- Turn 3 (served by Agent 1)
+Request 4: [instance-f9a8b7]  <- Turn 4 (served by Agent 3)
+
+✅ All requests served despite different instances!
+✅ Session history preserved across all instances via Redis!
+```
+
+###  Checkpoint 5
+
+- [x] Implement health và readiness checks
+- [x] Implement graceful shutdown
+- [x] Refactor code thành stateless
+- [x] Hiểu load balancing với Nginx
+- [x] Test stateless design
+
+## Part 6: Final Project
+
+### Exercise 6.1: Production Readiness Check Results
+Tất cả 20/20 hạng mục kiểm tra đều đã vượt qua thành công:
+
+```
+=======================================================
+  Production Readiness Check — Day 12 Lab
+=======================================================
+
+📁 Required Files
+  ✅ Dockerfile exists
+  ✅ docker-compose.yml exists
+  ✅ .dockerignore exists
+  ✅ .env.example exists
+  ✅ requirements.txt exists
+  ✅ railway.toml or render.yaml exists
+
+🔒 Security
+  ✅ .env in .gitignore
+  ✅ No hardcoded secrets in code
+
+🌐 API Endpoints (code check)
+  ✅ /health endpoint defined
+  ✅ /ready endpoint defined
+  ✅ Authentication implemented
+  ✅ Rate limiting implemented
+  ✅ Graceful shutdown (SIGTERM)
+  ✅ Structured logging (JSON)
+
+🐳 Docker
+  ✅ Multi-stage build
+  ✅ Non-root user
+  ✅ HEALTHCHECK instruction
+  ✅ Slim base image
+  ✅ .dockerignore covers .env
+  ✅ .dockerignore covers __pycache__
+
+=======================================================
+  Result: 20/20 checks passed (100%)
+  🎉 PRODUCTION READY! Deploy nào!
+=======================================================
+```
+
+### Exercise 6.2: Final Project Structure
+Cấu trúc thư mục của dự án hoàn chỉnh đúng theo yêu cầu checklist:
+- [main.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/main.py): Khởi tạo ứng dụng FastAPI, định nghĩa các router chính và tích hợp Middleware, CORS.
+- [config.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/config.py): Quản lý các cấu hình hệ thống kế thừa từ các biến môi trường (Pydantic Settings).
+- [auth.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/auth.py): Xử lý bảo mật, xác thực API Key thông qua header `X-API-Key`.
+- [rate_limiter.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/rate_limiter.py): Kiểm soát tần suất yêu cầu (Rate limiting) tích hợp in-memory fallback và Redis sliding window.
+- [cost_guard.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/cost_guard.py): Quản lý ngân sách tiêu dùng API của mô hình LLM, hỗ trợ lưu trữ trạng thái tiêu dùng qua Redis.
+
+### Checkpoint 6
+- [x] Build một production-ready AI agent từ đầu
+- [x] Tách cấu trúc file theo đúng chuẩn modular (main, config, auth, rate_limiter, cost_guard)
+- [x] Chạy script kiểm tra tự động đạt 100% điều kiện sẵn sàng sản xuất
+
