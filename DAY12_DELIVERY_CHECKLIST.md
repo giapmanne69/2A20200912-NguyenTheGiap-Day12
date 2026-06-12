@@ -38,9 +38,9 @@ Create a file `MISSION_ANSWERS.md` with your answers to all exercises:
 ...
 
 ### Exercise 2.3: Image size comparison
-- Develop: [X] MB
-- Production: [Y] MB
-- Difference: [Z]%
+- Develop: [1660] MB
+- Production: [236] MB
+- Difference: [85]%
 
 ## Part 3: Cloud Deployment
 
