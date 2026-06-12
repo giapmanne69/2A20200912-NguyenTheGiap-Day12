@@ -258,11 +258,11 @@ Tất cả 20/20 hạng mục kiểm tra đều đã vượt qua thành công:
 
 ### Exercise 6.2: Final Project Structure
 Cấu trúc thư mục của dự án hoàn chỉnh đúng theo yêu cầu checklist:
-- [main.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/main.py): Khởi tạo ứng dụng FastAPI, định nghĩa các router chính và tích hợp Middleware, CORS.
-- [config.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/config.py): Quản lý các cấu hình hệ thống kế thừa từ các biến môi trường (Pydantic Settings).
-- [auth.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/auth.py): Xử lý bảo mật, xác thực API Key thông qua header `X-API-Key`.
-- [rate_limiter.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/rate_limiter.py): Kiểm soát tần suất yêu cầu (Rate limiting) tích hợp in-memory fallback và Redis sliding window.
-- [cost_guard.py](file:///e:/VinAI/D12-12.6.2026/2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/cost_guard.py): Quản lý ngân sách tiêu dùng API của mô hình LLM, hỗ trợ lưu trữ trạng thái tiêu dùng qua Redis.
+- [main.py](2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/main.py): Khởi tạo ứng dụng FastAPI, định nghĩa các router chính và tích hợp Middleware, CORS.
+- [config.py](2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/config.py): Quản lý các cấu hình hệ thống kế thừa từ các biến môi trường (Pydantic Settings).
+- [auth.py](2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/auth.py): Xử lý bảo mật, xác thực API Key thông qua header `X-API-Key`.
+- [rate_limiter.py](2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/rate_limiter.py): Kiểm soát tần suất yêu cầu (Rate limiting) tích hợp in-memory fallback và Redis sliding window.
+- [cost_guard.py](2A20200912-NguyenTheGiap-Day12/06-lab-complete/app/cost_guard.py): Quản lý ngân sách tiêu dùng API của mô hình LLM, hỗ trợ lưu trữ trạng thái tiêu dùng qua Redis.
 
 ### Checkpoint 6
 - [x] Build một production-ready AI agent từ đầu
